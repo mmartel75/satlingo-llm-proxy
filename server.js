@@ -1,9 +1,10 @@
 /**
- * SATLingo LLM Proxy Server
+ * SATLingo LLM Proxy Server - SECURE VERSION
  * 
  * Simple Express server that proxies requests to Claude and OpenAI APIs
  * to bypass CORS restrictions for admin tools.
  * 
+ * SECURITY: Requires API key authentication
  * Deploy to Render.com free tier
  */
 
@@ -28,39 +29,71 @@ const corsOptions = {
     'https://satlingo.firebaseapp.com'
   ],
   methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
   credentials: false
 };
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 
-// Health check endpoint
+// API Key Authentication Middleware
+const API_SECRET = process.env.API_SECRET;
+
+if (!API_SECRET) {
+  console.error('❌ FATAL: API_SECRET environment variable is required');
+  process.exit(1);
+}
+
+const authenticateRequest = (req, res, next) => {
+  const providedKey = req.headers['x-api-key'];
+  
+  if (!providedKey) {
+    return res.status(401).json({ 
+      error: 'API key required', 
+      message: 'Include X-API-Key header' 
+    });
+  }
+  
+  if (providedKey !== API_SECRET) {
+    console.warn(`🚨 Unauthorized access attempt from IP: ${req.ip}`);
+    return res.status(401).json({ 
+      error: 'Invalid API key' 
+    });
+  }
+  
+  next();
+};
+
+// Public endpoints (no auth required)
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    security: 'API key authentication enabled'
   });
 });
 
-// Root endpoint with usage info
 app.get('/', (req, res) => {
   res.json({
     service: 'SATLingo LLM Proxy',
-    version: '1.0.0',
+    version: '1.0.0 (Secure)',
+    security: 'API key authentication required',
     endpoints: {
-      '/api/claude': 'Proxy to Claude API',
-      '/api/openai': 'Proxy to OpenAI API',
-      '/health': 'Health check'
+      '/api/claude': 'Proxy to Claude API (requires X-API-Key header)',
+      '/api/openai': 'Proxy to OpenAI API (requires X-API-Key header)',
+      '/health': 'Health check (public)'
     },
-    usage: 'POST to /api/claude or /api/openai with appropriate request body'
+    usage: 'Include X-API-Key header with all /api/* requests'
   });
 });
 
-// Claude API proxy
+// Apply authentication to all /api/* routes
+app.use('/api', authenticateRequest);
+
+// Claude API proxy (protected)
 app.post('/api/claude', async (req, res) => {
-  console.log('🔵 Claude API request received');
+  console.log('🔵 Authenticated Claude API request received');
   
   if (!process.env.CLAUDE_API_KEY) {
     return res.status(500).json({ error: 'Claude API key not configured' });
@@ -92,9 +125,9 @@ app.post('/api/claude', async (req, res) => {
   }
 });
 
-// OpenAI API proxy
+// OpenAI API proxy (protected)
 app.post('/api/openai', async (req, res) => {
-  console.log('🟡 OpenAI API request received');
+  console.log('🟡 Authenticated OpenAI API request received');
   
   if (!process.env.OPENAI_API_KEY) {
     return res.status(500).json({ error: 'OpenAI API key not configured' });
@@ -140,5 +173,6 @@ app.use('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 SATLingo LLM Proxy running on port ${PORT}`);
   console.log(`📡 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔒 Security: API key authentication enabled`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
